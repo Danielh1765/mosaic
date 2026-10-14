@@ -1,0 +1,6 @@
+# Vercel CLI ignores .gitignore. Keep real pages off Vercel.
+workspace/
+.DS_Store
+BASE44_PROMPT.md
+SPEC.md
+Start Mosaic.command

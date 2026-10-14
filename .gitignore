@@ -3,3 +3,4 @@ workspace/
 .vercel/
 .DS_Store
 node_modules/
+.vercel
