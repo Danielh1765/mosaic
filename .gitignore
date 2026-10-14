@@ -1,0 +1,5 @@
+# Dan's real pages stay on this Mac. Only demo-workspace/ goes online.
+workspace/
+.vercel/
+.DS_Store
+node_modules/

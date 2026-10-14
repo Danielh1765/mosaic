@@ -1,0 +1,11 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "outputDirectory": "public",
+  "functions": {
+    "api/index.mjs": { "includeFiles": "{server.mjs,demo-workspace/**}" }
+  },
+  "rewrites": [
+    { "source": "/api/:path*", "destination": "/api/index" },
+    { "source": "/covers/:path*", "destination": "/api/index" }
+  ]
+}
