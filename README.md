@@ -42,7 +42,16 @@ lsof -ti tcp:4321 | xargs kill
 - Home gallery settings: `workspace/.mosaic.json`.
 - Use another folder: `MOSAIC_WORKSPACE="/path" node server.mjs`.
 
+## Live demo (2026-10-14)
+- Site: https://mosaic-iota-one.vercel.app · Code: https://github.com/Danielh1765/mosaic (public).
+- The demo shows the sample pages in `demo-workspace/`. Your real `workspace/` never goes online (`.gitignore` and `.vercelignore` both block it).
+- Edits on the live site work but reset when Vercel restarts the server. Visitors share one copy.
+- To update the live site: commit and `git push`. Vercel deploys by itself.
+- Vercel CLI ignores `.gitignore`. Keep `workspace/` in `.vercelignore`.
+
 ## Files
+- `api/index.mjs` — Vercel entry. Copies `demo-workspace/` to `/tmp` and runs `server.mjs` on it.
+- `demo-workspace/` — sample pages for the live demo.
 - `server.mjs` — local server, Node built-ins only (no installs).
 - `public/` — the app (`index.html`, `app.css`, `app.js`).
 - `SPEC.md` — reverse-engineering notes and build spec.
