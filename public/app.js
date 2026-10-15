@@ -240,7 +240,7 @@ function renderMain() {
   const banner = cover && !media;
   const hasKids = childrenOf(page.id).length > 0;
   const iconBtn = `<button class="icon-btn ${page.icon ? "" : "empty"}" data-action="icon" aria-label="Change icon">${page.icon ? esc(page.icon) : "＋ Icon"}</button>`;
-  const metaRow = `<div class="meta-row">
+  const metaRow = `<div class="meta-row page-footer">
         ${folder}
         ${cover ? (media ? `<button class="ghost-btn" data-action="cover">🖼 Change poster</button>` : "") : `<button class="ghost-btn" data-action="cover">🖼 Add cover</button>`}
         ${hasKids ? "" : `<button class="ghost-btn" data-action="new-child" data-parent="${page.id}">＋ Add a card inside</button>`}
@@ -258,10 +258,9 @@ function renderMain() {
       <div class="media-layout">
         <img class="media-poster" src="${esc(cover)}" alt="${esc(page.title)} poster">
         <div class="media-main">
-          ${page.icon ? `<div class="head">${iconBtn}</div>` : ""}
-          ${title}
-          ${metaRow}
+          <div class="head">${page.icon ? iconBtn : ""}${title}</div>
           ${body}
+          ${metaRow}
         </div>
       </div>
       ${hasKids ? collectionHtml(page.id) : ""}
@@ -271,12 +270,11 @@ function renderMain() {
     </div>` : ""}
     <div class="page ${banner ? "has-banner" : ""}">
       ${banner ? "" : crumbsHtml}
-      <div class="head">${iconBtn}</div>
+      <div class="head">${iconBtn}${title}</div>
       ${banner ? crumbsHtml : ""}
-      ${title}
-      ${metaRow}
       ${hasKids ? collectionHtml(page.id) : ""}
       ${body}
+      ${metaRow}
     </div>`;
   document.title = `${page.title || "Untitled"} · Mosaic`;
 }

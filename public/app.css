@@ -421,13 +421,14 @@ body { font: 15px/1.5 var(--font); letter-spacing: -0.005em; }
   .media-poster { position: static; max-width: 260px; }
 }
 
-.demo-note {
-  margin: 0;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: var(--accent-soft);
-  color: var(--accent-ink);
-  font-size: 12px;
-  line-height: 1.4;
-}
-.demo-note[hidden] { display: none; }
+
+/* Page head: emoji and title share one line. Page actions sit at the bottom. */
+.head { align-items: center; }
+.head .title { flex: 1; min-width: 0; }
+.has-banner .head { margin-top: 0; align-items: flex-end; }
+.has-banner .head .icon-btn { margin-top: -46px; }
+.meta-row.page-footer { margin: 32px 0 8px; padding-top: 16px; border-top: 1px solid var(--line); }
+.head { position: relative; }
+.head .icon-btn.empty { position: absolute; left: 0; top: -30px; margin: 0; opacity: 0; transition: opacity 0.2s var(--ease); }
+.has-banner .head .icon-btn.empty { top: -34px; color: #fff; }
+.head:hover .icon-btn.empty, .head .icon-btn.empty:focus-visible { opacity: 1; }

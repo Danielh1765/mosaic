@@ -21,7 +21,6 @@
         <input id="search" type="search" placeholder="Search pages" autocomplete="off">
         <kbd>⌘K</kbd>
       </label>
-      <p class="demo-note" id="demo-note" hidden>Live demo. Edits reset now and then.</p>
       <nav class="tree" id="tree" aria-label="Pages"></nav>
       <a class="trash-link" id="trash-link" href="#/trash"><svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 4h11M6.5 4V2.5h3V4M4 4l.7 9.2c.1.7.6 1.3 1.3 1.3h4c.7 0 1.2-.6 1.3-1.3L12 4"/></svg><span>Trash</span><span class="trash-count" id="trash-count"></span></a>
       <button class="new-root" id="new-root" type="button">+ New page</button>
@@ -30,9 +29,6 @@
   </div>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <input type="file" id="cover-input" accept="image/*" hidden>
-  <script>
-    if (!["localhost", "127.0.0.1"].includes(location.hostname)) document.getElementById("demo-note").hidden = false;
-  </script>
   <script type="module" src="/app.js"></script>
 </body>
 </html>
