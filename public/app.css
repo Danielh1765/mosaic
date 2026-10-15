@@ -450,3 +450,4 @@ body { font: 15px/1.5 var(--font); letter-spacing: -0.005em; }
 .sign-out { border: 0; background: none; color: var(--ink-soft); font-size: 13px; padding: 4px 10px; text-align: left; }
 .sign-out:hover { color: var(--ink); }
 .sign-out[hidden] { display: none; }
+.signin-alt[hidden] { display: none; }

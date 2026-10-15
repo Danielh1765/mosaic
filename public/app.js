@@ -77,6 +77,14 @@ function showSignIn() {
   if (["localhost", "127.0.0.1"].includes(location.hostname))
     $("#signin-msg").textContent = "The first sign-in on your Mac uploads all your pages. It takes a minute or two.";
   box.querySelector("input").focus();
+  fetch("/api/has-account").then((r) => r.json()).then(({ hasAccount }) => {
+    if (hasAccount) return;
+    const go = box.querySelector(".signin-go");
+    go.textContent = "Create your account";
+    go.dataset.mode = "signup";
+    box.querySelector(".signin-alt").hidden = true;
+    box.querySelector('[name="password"]').autocomplete = "new-password";
+  }).catch(() => {});
 }
 
 $("#signin-form").addEventListener("submit", async (event) => {

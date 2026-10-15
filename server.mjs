@@ -8,7 +8,7 @@ import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createFileStore, newId, slugify } from "./store-files.mjs";
 import { createCloudStore } from "./store-cloud.mjs";
-import { getSession, signIn, signUp, setSessionCookie, clearSessionCookie } from "./auth.mjs";
+import { getSession, signIn, signUp, setSessionCookie, clearSessionCookie, hasOwner } from "./auth.mjs";
 import { importFromMac, saveToMac } from "./mirror.mjs";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -234,6 +234,7 @@ export async function handleRequest(req, res) {
     const isCover = url.pathname.startsWith("/covers/");
     if (!isApi && !isCover) return await sendStatic(res, PUBLIC, url.pathname === "/" ? "index.html" : url.pathname.slice(1));
     if (["/api/login", "/api/signup", "/api/logout"].includes(url.pathname) && req.method === "POST") return await handleAuth(req, res, url);
+    if (url.pathname === "/api/has-account" && req.method === "GET") return sendJson(res, 200, { hasAccount: await hasOwner() });
 
     let store = macFiles;
     if (!OFFLINE) {

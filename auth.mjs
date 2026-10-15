@@ -72,3 +72,9 @@ export async function getSession(req, res) {
     return null;
   }
 }
+
+/** @returns {Promise<boolean>} true once the one Mosaic account exists */
+export async function hasOwner() {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/mosaic_has_owner`, { method: "POST", headers: { apikey: SUPABASE_KEY, "Content-Type": "application/json" }, body: "{}" });
+  return res.ok ? Boolean(await res.json()) : true;
+}
