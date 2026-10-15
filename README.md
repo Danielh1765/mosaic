@@ -1,5 +1,5 @@
 # Mosaic
-Last updated: 2026-10-15 (v3, online)
+Last updated: 2026-10-15 (v3.1, block editor)
 
 A visual-first page and card app. A personal alternative to Notion. Use it online at https://mosaic-iota-one.vercel.app or on this Mac at http://localhost:4321. Both show the same pages. Sign in with your Mosaic account.
 
@@ -31,8 +31,12 @@ lsof -ti tcp:4321 | xargs kill
 - **Covers:** drag an image from Finder onto a card. Or open a page and paste an image (⌘V). Or use ⋯ → Add cover.
 - **Folders:** link a page to a real folder (⌥⌘C in Finder copies the path). The 📁 button opens it in Finder (Mac app only). A red, crossed-out path means the folder is missing.
 - **Reorder:** drag cards. Drop a card on a sidebar page to move it inside that page.
-- **Write:** click the text area under the cards. Markdown works. Click a `[ ]` box to tick it.
-- **Callouts:** while editing, click 💡 Callout, or type `> [!🍿 gray]` then `> your text` on the next lines. Colours: gray, brown, orange, yellow, green, blue, purple, pink, red. Obsidian types like `> [!tip]` work too.
+- **Write:** click anywhere on the page and type. The page always stays formatted. Click below the last line to add more.
+- **"/" menu:** type `/` for Text, Heading 1–3, Toggle list, Toggle heading 1–3, Bulleted list, Numbered list, To-do, Callout, Quote, Divider, Code or Page (a new page inside this one). Type a word after `/` to filter. Arrow keys + Enter pick.
+- **Shortcuts at the start of a line:** `# ` `## ` `### ` headings, `- ` bullet, `1. ` numbered, `[] ` to-do, `> ` quote, ` ``` ` code, `---` divider. `**bold**`, `*italic*` and `` `code` `` show formatted after you press Enter.
+- **Blocks:** hover a line. `+` adds a line below. Drag `⋮⋮` to move it. Click `⋮⋮` to duplicate, delete, turn it into another block, or change a callout's colour. Click a callout's emoji to change it.
+- **Keys:** Enter = new line (twice leaves a list or a box). Backspace at the start of a line joins it to the line above. Links open with a click.
+- Pages still save as Markdown. Toggles save as Obsidian foldable callouts (`> [!toggle]- Title`).
 - **Poster pages:** when a list uses Poster, Portrait or Tall cards, each page inside shows its cover as a poster beside the details.
 - **From Notion (2026-10-14):** Movies (351), Series (60) and Documentaries (27) live in 02 Areas › Enjoyment › Entertainment. Posters are saved in `workspace/covers/media/`.
 - **From Notion, goals (2026-10-14):** 13 Quarterly Quests filed under their pillars (status "Quest"). Meaning holds the Quarterly Quests overview (links to every quest), Future Sketch, Days and Weeks. Templates and empty pages were skipped.
@@ -61,5 +65,5 @@ lsof -ti tcp:4321 | xargs kill
 - `mirror.mjs` — first upload from the Mac, then save to Mac.
 - `auth.mjs` — sign-in, 30-day session cookie. `config.mjs` — Supabase address and public key.
 - `api/index.mjs` — Vercel entry.
-- `public/` — the app (`index.html`, `app.css`, `app.js`).
+- `public/` — the app (`index.html`, `app.css`, `app.js`, `editor.js` = the block editor).
 - `SPEC.md` — reverse-engineering notes and build spec.
