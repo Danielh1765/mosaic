@@ -2,6 +2,8 @@
 // Each block is its own small editable area. Pages are still saved as plain Markdown.
 
 const CALLOUT_COLORS = ["gray", "brown", "orange", "yellow", "green", "blue", "purple", "pink", "red"];
+// Colour words Mosaic has no swatch for (from Notion exports etc.) are kept as written; this picks the nearest swatch to show.
+const NEAR_COLORS = { default: "gray", grey: "gray", white: "gray", black: "gray", teal: "green", lime: "green", cyan: "blue", navy: "blue", indigo: "purple", violet: "purple", magenta: "pink", amber: "yellow", gold: "yellow", tan: "brown", beige: "brown" };
 const CALLOUT_TYPES = { note: ["📝", "blue"], info: ["ℹ️", "blue"], tip: ["💡", "green"], success: ["✅", "green"], question: ["❓", "yellow"], warning: ["⚠️", "orange"], danger: ["🚨", "red"], quote: ["💬", "gray"], example: ["🧪", "purple"] };
 const TEXT_TYPES = new Set(["p", "h1", "h2", "h3", "bullet", "numbered", "todo", "toggle"]);
 const LIST_TYPES = new Set(["bullet", "numbered", "todo"]);
@@ -30,7 +32,7 @@ const COMMANDS = [
   { id: "gallery", label: "Gallery", hint: "Show the cards of a page", glyph: "▤", words: "gallery cards board covers linked view" },
 ];
 
-/** @typedef {{id:string,type:string,text?:string,checked?:boolean,level?:number,icon?:string,color?:string,kind?:string,explicitColor?:boolean,fold?:string,open?:boolean,lang?:string,pageId?:string,label?:string,children?:Block[],rows?:string[][],align?:string[],at?:{r:number,c:number},picking?:boolean}} Block */
+/** @typedef {{id:string,type:string,text?:string,checked?:boolean,level?:number,icon?:string,color?:string,kind?:string,colorWord?:string,explicitColor?:boolean,fold?:string,open?:boolean,lang?:string,pageId?:string,label?:string,children?:Block[],rows?:string[][],align?:string[],at?:{r:number,c:number},picking?:boolean}} Block */
 
 let nextId = 1;
 /** @param {Partial<Block>} props @returns {Block} */
@@ -52,13 +54,15 @@ export function inlineToHtml(text) {
     .replace(/~~([^~]+)~~/g, "<del>$1</del>");
 }
 
-/** @param {string} head @returns {{kind:string,icon:string,color:string,explicitColor:boolean,fold:string,title:string}|null} */
+/** @param {string} head @returns {{kind:string,icon:string,color:string,colorWord:string,explicitColor:boolean,fold:string,title:string}|null} */
 function parseCalloutHead(head) {
   const m = head.match(/^\[!([^\]\s]+)(?:\s+([a-z]+))?\]([+-]?)\s*(.*)$/i);
   if (!m) return null;
   const type = CALLOUT_TYPES[m[1].toLowerCase()];
-  const named = CALLOUT_COLORS.includes((m[2] || "").toLowerCase());
-  return { kind: m[1], icon: type ? type[0] : m[1], color: named ? m[2].toLowerCase() : type ? type[1] : "gray", explicitColor: named, fold: m[3], title: m[4] };
+  const word = (m[2] || "").toLowerCase();
+  const fallback = type ? type[1] : "gray";
+  const color = CALLOUT_COLORS.includes(word) ? word : NEAR_COLORS[word] || fallback;
+  return { kind: m[1], icon: type ? type[0] : m[1], color, colorWord: m[2] || "", explicitColor: Boolean(m[2]), fold: m[3], title: m[4] };
 }
 
 const TABLE_SEP = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
@@ -104,7 +108,7 @@ export function parseMarkdown(md) {
       } else if (head) {
         const children = parseMarkdown(inner.slice(1).join("\n"));
         if (head.title) children.unshift(blk({ type: "p", text: `**${head.title}**` }));
-        out.push(blk({ type: "callout", kind: head.kind, icon: head.icon, color: head.color, explicitColor: head.explicitColor, fold: head.fold, children }));
+        out.push(blk({ type: "callout", kind: head.kind, icon: head.icon, color: head.color, colorWord: head.colorWord, explicitColor: head.explicitColor, fold: head.fold, children }));
       } else out.push(blk({ type: "quote", children: parseMarkdown(inner.join("\n")) }));
       continue;
     }
@@ -183,7 +187,7 @@ function blockLines(b, titleOf, n) {
       return inner.length ? quoted(inner) : null;
     }
     case "callout": {
-      const head = `[!${b.kind || b.icon || "💡"}${b.explicitColor ? ` ${b.color}` : ""}]${b.fold || ""}`;
+      const head = `[!${b.kind || b.icon || "💡"}${b.explicitColor ? ` ${b.colorWord || b.color}` : ""}]${b.fold || ""}`;
       return quoted([head, ...toLines(b.children || [], titleOf)]);
     }
     case "toggle": return quoted([`[!toggle]-${b.level ? ` ${"#".repeat(b.level)}` : ""} ${text}`.replace(/\s+$/, ""), ...toLines(b.children || [], titleOf)]);
@@ -958,7 +962,7 @@ export function mountEditor(host, options) {
     if (cmd) return chooseCommand(cmd);
     const spot = b && find(b.id);
     if (!spot) return;
-    if (color) { Object.assign(b, { color, explicitColor: true }); closeMenu(); render(); changed(); }
+    if (color) { Object.assign(b, { color, colorWord: "", explicitColor: true }); closeMenu(); render(); changed(); }
     if (extra === "dup") { const copy = clone(b); spot.list.splice(spot.index + 1, 0, copy); closeMenu(); render(); changed(); }
     if (extra === "del") { spot.list.splice(spot.index, 1); closeMenu(); render(); changed(); }
   }
