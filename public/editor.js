@@ -6,6 +6,7 @@ const CALLOUT_TYPES = { note: ["📝", "blue"], info: ["ℹ️", "blue"], tip: [
 const TEXT_TYPES = new Set(["p", "h1", "h2", "h3", "bullet", "numbered", "todo", "toggle"]);
 const LIST_TYPES = new Set(["bullet", "numbered", "todo"]);
 const CONTAINERS = new Set(["quote", "callout", "toggle"]);
+const SOLID = new Set(["divider", "page", "table", "gallery"]);
 
 /** Slash menu and "Turn into" choices. */
 const COMMANDS = [
@@ -25,9 +26,11 @@ const COMMANDS = [
   { id: "divider", label: "Divider", hint: "Line between sections", glyph: "—", words: "divider line hr rule separator" },
   { id: "code", label: "Code", hint: "Code or plain text", glyph: "</>", words: "code snippet pre" },
   { id: "page", label: "Page", hint: "New page inside this one", glyph: "📄", words: "page subpage sub-page link new" },
+  { id: "table", label: "Table", hint: "Rows and columns", glyph: "▦", words: "table grid rows columns spreadsheet" },
+  { id: "gallery", label: "Gallery", hint: "Show the cards of a page", glyph: "▤", words: "gallery cards board covers linked view" },
 ];
 
-/** @typedef {{id:string,type:string,text?:string,checked?:boolean,level?:number,icon?:string,color?:string,kind?:string,explicitColor?:boolean,fold?:string,open?:boolean,lang?:string,pageId?:string,label?:string,children?:Block[]}} Block */
+/** @typedef {{id:string,type:string,text?:string,checked?:boolean,level?:number,icon?:string,color?:string,kind?:string,explicitColor?:boolean,fold?:string,open?:boolean,lang?:string,pageId?:string,label?:string,children?:Block[],rows?:string[][],align?:string[],at?:{r:number,c:number},picking?:boolean}} Block */
 
 let nextId = 1;
 /** @param {Partial<Block>} props @returns {Block} */
@@ -58,6 +61,25 @@ function parseCalloutHead(head) {
   return { kind: m[1], icon: type ? type[0] : m[1], color: named ? m[2].toLowerCase() : type ? type[1] : "gray", explicitColor: named, fold: m[3], title: m[4] };
 }
 
+const TABLE_SEP = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
+
+/** @param {string} line @returns {string[]} cells of one pipe-table row */
+function splitRow(line) {
+  const cells = [];
+  let cur = "";
+  const body = line.trim().replace(/^\|/, "").replace(/(^|[^\\])\|$/, "$1");
+  for (let i = 0; i < body.length; i++) {
+    if (body[i] === "\\" && body[i + 1] === "|") { cur += "|"; i++; }
+    else if (body[i] === "|") { cells.push(cur.trim()); cur = ""; }
+    else cur += body[i];
+  }
+  cells.push(cur.trim());
+  return cells;
+}
+
+/** @param {string} cell @returns {string} alignment name from a separator cell */
+const alignOf = (cell) => (cell.startsWith(":") && cell.endsWith(":") ? "center" : cell.endsWith(":") ? "right" : cell.startsWith(":") ? "left" : "");
+
 /** @param {string} md @returns {Block[]} */
 export function parseMarkdown(md) {
   const lines = String(md || "").replace(/\r/g, "").split("\n");
@@ -86,6 +108,19 @@ export function parseMarkdown(md) {
       } else out.push(blk({ type: "quote", children: parseMarkdown(inner.join("\n")) }));
       continue;
     }
+    if (line.includes("|") && lines[i + 1]?.includes("|") && TABLE_SEP.test(lines[i + 1])) {
+      const head = splitRow(line);
+      const align = splitRow(lines[i + 1]).map(alignOf);
+      const rows = [head];
+      i += 2;
+      while (i < lines.length && lines[i].includes("|") && lines[i].trim()) rows.push(splitRow(lines[i++]));
+      i--;
+      const width = Math.max(...rows.map((r) => r.length));
+      out.push(blk({ type: "table", rows: rows.map((r) => [...r, ...Array(width - r.length).fill("")]), align: Array.from({ length: width }, (_, c) => align[c] || "") }));
+      continue;
+    }
+    const gallery = line.trim().match(/^\[Gallery: ([^\]]*)\]\(#\/gallery\/(\w+)\)$/);
+    if (gallery) { out.push(blk({ type: "gallery", pageId: gallery[2], label: gallery[1] })); continue; }
     const page = line.trim().match(/^\[([^\]]*)\]\(#\/p\/(\w+)\)$/);
     const todo = line.match(/^\s*[-*] \[( |x|X)\](?: (.*))?$/);
     const bullet = line.match(/^\s*[-*] (.*)$/);
@@ -135,6 +170,14 @@ function blockLines(b, titleOf, n) {
     case "divider": return ["---"];
     case "code": return ["```" + (b.lang || ""), ...(b.text || "").split("\n"), "```"];
     case "page": return [`[${(titleOf(b.pageId) || b.label || "Untitled").replace(/[[\]]/g, "")}](#/p/${b.pageId})`];
+    case "table": {
+      const cell = (t) => ` ${String(t || "").replace(/\|/g, "\\|").trim()} `;
+      const row = (r) => `|${r.map(cell).join("|")}|`;
+      const sep = (b.align || []).concat(Array(b.rows[0].length).fill("")).slice(0, b.rows[0].length)
+        .map((a) => ` ${a === "center" ? ":---:" : a === "right" ? "---:" : a === "left" ? ":---" : "---"} `);
+      return [row(b.rows[0]), `|${sep.join("|")}|`, ...b.rows.slice(1).map(row)];
+    }
+    case "gallery": return b.pageId ? [`[Gallery: ${(titleOf(b.pageId) || b.label || "Untitled").replace(/[[\]]/g, "")}](#/gallery/${b.pageId})`] : null;
     case "quote": {
       const inner = toLines(b.children || [], titleOf);
       return inner.length ? quoted(inner) : null;
@@ -249,7 +292,8 @@ function caretRect() {
 /**
  * @param {HTMLElement} host
  * @param {{markdown:string, onChange:(md:string)=>void, titleOf:(id:string)=>string, iconOf:(id:string)=>string,
- *   createPage:()=>Promise<string|null>, openPage:(id:string)=>void, pickEmoji:(anchor:HTMLElement, done:(emoji:string)=>void)=>void}} options
+ *   createPage:()=>Promise<string|null>, openPage:(id:string)=>void, pickEmoji:(anchor:HTMLElement, done:(emoji:string)=>void)=>void,
+ *   galleryHtml:(id:string)=>string, listPages:()=>{id:string,title:string,icon:string,count:number}[]}} options
  * @returns {{destroy:()=>void}}
  */
 export function mountEditor(host, options) {
@@ -304,6 +348,8 @@ export function mountEditor(host, options) {
       case "divider": inner = `<hr contenteditable="false">`; break;
       case "code": inner = `<pre class="blk-text blk-code" contenteditable="plaintext-only" spellcheck="false" data-ph="Code">${esc(b.text || "")}</pre>`; break;
       case "page": inner = `<a class="blk-page" contenteditable="false" href="#/p/${esc(b.pageId)}"><span>${esc(options.iconOf(b.pageId) || "📄")}</span><span>${esc(options.titleOf(b.pageId) || b.label || "Untitled")}</span></a>`; break;
+      case "table": inner = tableHtml(b); break;
+      case "gallery": inner = galleryHtml(b); break;
       case "quote": inner = `<div class="blk-children"></div>`; break;
       case "callout": inner = `<aside class="callout callout-${esc(b.color || "gray")}"><button type="button" class="callout-icon" data-ed="icon" contenteditable="false" aria-label="Change emoji">${esc(b.icon || "💡")}</button><div class="callout-body blk-children"></div></aside>`; break;
       case "toggle": inner = `<div class="toggle-row"><button type="button" class="toggle-arrow ${b.open ? "open" : ""}" data-ed="fold" contenteditable="false" aria-label="${b.open ? "Close" : "Open"}" aria-expanded="${Boolean(b.open)}">▸</button>${text(b.level ? `h${b.level}` : "", b.level ? `Toggle heading` : "Toggle")}</div><div class="blk-children toggle-kids" ${b.open ? "" : "hidden"}></div>`; break;
@@ -312,6 +358,46 @@ export function mountEditor(host, options) {
     const kids = el.querySelector(".blk-children");
     if (kids) renderList(b.children || [], kids);
     return el;
+  }
+
+  /** @param {Block} b @returns {string} the table with editable cells and row/column buttons */
+  function tableHtml(b) {
+    const cells = b.rows.map((row, r) => `<tr>${row.map((t, c) => {
+      const tag = r === 0 ? "th" : "td";
+      const align = b.align?.[c] ? ` style="text-align:${b.align[c]}"` : "";
+      return `<${tag} class="tbl-cell" contenteditable="true" spellcheck="true" data-r="${r}" data-c="${c}"${align}>${inlineToHtml(t)}</${tag}>`;
+    }).join("")}</tr>`).join("");
+    const btn = (ed, label, title) => `<button type="button" data-ed="${ed}" title="${title}" tabindex="-1">${label}</button>`;
+    return `<div class="tbl-wrap"><div class="tbl-scroll"><table class="tbl"><tbody>${cells}</tbody></table></div>
+      <div class="tbl-tools" contenteditable="false">${btn("row-add", "+ Row", "Add a row below the cursor")}${btn("col-add", "+ Column", "Add a column right of the cursor")}${btn("row-del", "− Row", "Remove the row with the cursor")}${btn("col-del", "− Column", "Remove the column with the cursor")}</div></div>`;
+  }
+
+  /** @param {string} query @param {string} current @returns {string} page choices for a gallery */
+  function galleryChoices(query, current) {
+    const q = query.toLowerCase().trim();
+    const hits = options.listPages()
+      .filter((p) => !q || p.title.toLowerCase().includes(q))
+      .sort((a, b) => Number(b.count > 0) - Number(a.count > 0) || a.title.localeCompare(b.title))
+      .slice(0, 8);
+    if (!hits.length) return `<p class="gal-empty">No page called “${esc(query)}”.</p>`;
+    return hits.map((p, i) => `<button type="button" class="${i === 0 ? "on" : ""} ${p.id === current ? "current" : ""}" data-gal="${esc(p.id)}"><span>${esc(p.icon || "📄")}</span><strong>${esc(p.title)}</strong><small>${p.count} card${p.count === 1 ? "" : "s"}</small></button>`).join("");
+  }
+
+  /** @param {Block} b @returns {string} the gallery cards, or the page picker */
+  function galleryHtml(b) {
+    if (!b.pageId || b.picking) {
+      return `<div class="gal gal-picking" contenteditable="false"><p class="gal-ask">Show the cards of which page?</p>
+        <input class="gal-search" type="search" placeholder="Search pages…" aria-label="Search pages" autocomplete="off">
+        <div class="gal-list" role="listbox">${galleryChoices("", b.pageId)}</div></div>`;
+    }
+    const title = options.titleOf(b.pageId);
+    const cards = title ? options.galleryHtml(b.pageId) : "";
+    const count = options.listPages().find((p) => p.id === b.pageId)?.count || 0;
+    return `<div class="gal" contenteditable="false">
+      <div class="gal-head"><a class="gal-title" href="#/p/${esc(b.pageId)}">${esc(options.iconOf(b.pageId) || "📄")} ${esc(title || b.label || "Missing page")}</a>
+        <span class="gal-count">${title ? `${count} card${count === 1 ? "" : "s"}` : "Page not found"}</span>
+        <button type="button" class="gal-change" data-ed="gal-pick" tabindex="-1">Change page</button></div>
+      ${cards || `<p class="gal-empty">${title ? "No cards inside this page yet." : "This page was deleted or moved to the trash."}</p>`}</div>`;
   }
 
   /** @param {Block[]} list @param {HTMLElement} into @returns {void} */
@@ -347,8 +433,14 @@ export function mountEditor(host, options) {
   /** @param {HTMLElement} el @returns {string} */
   const blockIdOf = (el) => el.closest(".blk")?.dataset.bid;
 
-  /** @returns {HTMLElement[]} every typing area in reading order */
-  const textAreas = () => [...root.querySelectorAll(".blk-text")].filter((t) => !t.closest("[hidden]"));
+  /** @returns {HTMLElement[]} every typing area in reading order, table cells included */
+  const textAreas = () => [...root.querySelectorAll(".blk-text, .tbl-cell")].filter((t) => !t.closest("[hidden]"));
+
+  /** @param {string} id @param {number} r @param {number} c @param {number|"end"} [offset] @returns {void} */
+  function focusCell(id, r, c, offset = "end") {
+    const cell = root.querySelector(`[data-bid="${id}"] .tbl-cell[data-r="${r}"][data-c="${c}"]`);
+    if (cell) placeCaret(cell, offset);
+  }
 
   /* --- turning blocks into other blocks --- */
 
@@ -383,25 +475,29 @@ export function mountEditor(host, options) {
   async function applyCommand(b, cmd) {
     const spot = find(b.id);
     if (!spot) return;
-    const empty = !(b.text || "").trim() && !b.children?.some((k) => (k.text || "").trim());
-    if (cmd === "divider" || cmd === "page") {
+    const empty = !SOLID.has(b.type) && !(b.text || "").trim() && !b.children?.some((k) => (k.text || "").trim());
+    if (SOLID.has(cmd)) {
       let newBlock;
       if (cmd === "page") {
         const pageId = await options.createPage();
         if (!pageId) return;
         newBlock = blk({ type: "page", pageId });
-      } else newBlock = blk({ type: "divider" });
+      } else if (cmd === "table") newBlock = blk({ type: "table", rows: [["", "", ""], ["", "", ""], ["", "", ""]], align: ["", "", ""] });
+      else if (cmd === "gallery") newBlock = blk({ type: "gallery", pageId: "" });
+      else newBlock = blk({ type: "divider" });
       if (empty && b.type === "p") spot.list.splice(spot.index, 1, newBlock);
       else spot.list.splice(spot.index + 1, 0, newBlock);
       const after = blk({ type: "p" });
       const at = spot.list.indexOf(newBlock);
       if (!spot.list[at + 1] || !TEXT_TYPES.has(spot.list[at + 1].type)) spot.list.splice(at + 1, 0, after);
       render(TEXT_TYPES.has(spot.list[at + 1].type) ? spot.list[at + 1].id : after.id);
+      if (cmd === "table") focusCell(newBlock.id, 0, 0);
+      if (cmd === "gallery") root.querySelector(`[data-bid="${newBlock.id}"] .gal-search`)?.focus();
       changed();
       if (cmd === "page") options.openPage(newBlock.pageId);
       return;
     }
-    if (empty || TEXT_TYPES.has(b.type) || CONTAINERS.has(b.type)) {
+    if (!SOLID.has(b.type) && (empty || TEXT_TYPES.has(b.type) || CONTAINERS.has(b.type))) {
       const target = turnInto(b, cmd);
       render(target.id, "end");
     } else {
@@ -517,6 +613,17 @@ export function mountEditor(host, options) {
   /* --- typing --- */
 
   root.addEventListener("input", (e) => {
+    const cell = e.target.closest(".tbl-cell");
+    if (cell) {
+      const b = find(blockIdOf(cell))?.block;
+      if (b) { b.rows[cell.dataset.r][cell.dataset.c] = elToInline(cell).replace(/\s+/g, " "); changed(); }
+      return;
+    }
+    if (e.target.matches(".gal-search")) {
+      const b = find(blockIdOf(e.target))?.block;
+      e.target.closest(".gal").querySelector(".gal-list").innerHTML = galleryChoices(e.target.value, b?.pageId || "");
+      return;
+    }
     const textEl = e.target.closest(".blk-text");
     if (!textEl) return;
     const b = find(blockIdOf(textEl))?.block;
@@ -528,8 +635,11 @@ export function mountEditor(host, options) {
   });
 
   root.addEventListener("keydown", (e) => {
+    if (e.isComposing) return;
+    if (e.target.closest(".tbl-cell")) { cellKey(e, e.target.closest(".tbl-cell")); return; }
+    if (e.target.matches(".gal-search")) { gallerySearchKey(e); return; }
     const textEl = e.target.closest(".blk-text");
-    if (!textEl || e.isComposing) return;
+    if (!textEl) return;
     const id = blockIdOf(textEl);
     const spot = find(id);
     if (!spot) return;
@@ -611,9 +721,12 @@ export function mountEditor(host, options) {
       }
       const prev = spot.list[spot.index - 1];
       if (prev.type === "divider" || prev.type === "page") { spot.list.splice(spot.index - 1, 1); render(b.id); changed(); return; }
+      if (prev.type === "table") { focusCell(prev.id, prev.rows.length - 1, prev.rows[0].length - 1); return; }
+      if (prev.type === "gallery") return;
       const areas = textAreas();
       const prevArea = areas[areas.indexOf(textEl) - 1];
       const prevBlock = prevArea && find(blockIdOf(prevArea))?.block;
+      if (prevBlock?.type === "table") { placeCaret(prevArea, "end"); return; }
       if (!prevBlock || prevBlock.type === "code") return;
       const joinAt = prevArea.textContent.length;
       prevBlock.text = `${prevBlock.text || ""}${b.text || ""}`;
@@ -638,6 +751,106 @@ export function mountEditor(host, options) {
     if (e.key === "Tab") e.preventDefault();
   });
 
+  /** @param {KeyboardEvent} e @param {HTMLElement} cell @returns {void} Tab, Enter and arrows inside a table */
+  function cellKey(e, cell) {
+    const spot = find(blockIdOf(cell));
+    if (!spot) return;
+    const b = spot.block;
+    const r = Number(cell.dataset.r);
+    const c = Number(cell.dataset.c);
+    const cols = b.rows[0].length;
+    const last = b.rows.length - 1;
+    if (e.key === "Tab") {
+      e.preventDefault();
+      if (e.shiftKey) { if (c > 0) focusCell(b.id, r, c - 1); else if (r > 0) focusCell(b.id, r - 1, cols - 1); return; }
+      if (c < cols - 1) focusCell(b.id, r, c + 1);
+      else if (r < last) focusCell(b.id, r + 1, 0);
+      else { b.rows.push(Array(cols).fill("")); render(); focusCell(b.id, r + 1, 0); changed(); }
+      return;
+    }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      if (r < last) focusCell(b.id, r + 1, c);
+      else { b.rows.push(Array(cols).fill("")); render(); focusCell(b.id, r + 1, c); changed(); }
+      return;
+    }
+    const areas = textAreas();
+    if (e.key === "ArrowUp" && caretOnFirstLine(cell)) {
+      e.preventDefault();
+      if (r > 0) focusCell(b.id, r - 1, c);
+      else { const before = areas[areas.indexOf(root.querySelector(`[data-bid="${b.id}"] .tbl-cell`)) - 1]; if (before) placeCaret(before, "end"); }
+      return;
+    }
+    if (e.key === "ArrowDown" && caretOnLastLine(cell)) {
+      e.preventDefault();
+      if (r < last) focusCell(b.id, r + 1, c);
+      else { const cells = root.querySelectorAll(`[data-bid="${b.id}"] .tbl-cell`); const after = areas[areas.indexOf(cells[cells.length - 1]) + 1]; if (after) placeCaret(after, 0); }
+    }
+  }
+
+  /** @param {KeyboardEvent} e @returns {void} Enter picks the top page, arrows move, Escape cancels */
+  function gallerySearchKey(e) {
+    const input = /** @type {HTMLInputElement} */ (e.target);
+    const spot = find(blockIdOf(input));
+    if (!spot) return;
+    const list = input.closest(".gal").querySelector(".gal-list");
+    const items = [...list.querySelectorAll("[data-gal]")];
+    const on = items.findIndex((x) => x.classList.contains("on"));
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (!items.length) return;
+      const next = (on + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+      items.forEach((x, i) => x.classList.toggle("on", i === next));
+      items[next].scrollIntoView({ block: "nearest" });
+      return;
+    }
+    if (e.key === "Enter") { e.preventDefault(); if (items[Math.max(0, on)]) pickGallery(spot.block, items[Math.max(0, on)].dataset.gal); return; }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      if (spot.block.pageId) { spot.block.picking = false; render(); }
+      else { spot.list.splice(spot.index, 1); render(); changed(); }
+    }
+  }
+
+  /** @param {Block} b @param {string} pageId @returns {void} */
+  function pickGallery(b, pageId) {
+    b.pageId = pageId;
+    b.label = options.titleOf(pageId);
+    b.picking = false;
+    render();
+    changed();
+  }
+
+  /** @param {Block} b @param {string} action @returns {void} adds or removes a table row or column at the cursor */
+  function editTable(b, action) {
+    const cols = b.rows[0].length;
+    const at = b.at || { r: b.rows.length - 1, c: cols - 1 };
+    let { r, c } = at;
+    if (action === "row-add") { b.rows.splice(r + 1, 0, Array(cols).fill("")); r += 1; }
+    if (action === "col-add") { b.rows.forEach((row) => row.splice(c + 1, 0, "")); (b.align ||= []).splice(c + 1, 0, ""); c += 1; }
+    if (action === "row-del") {
+      if (b.rows.length === 1) return;
+      b.rows.splice(r, 1);
+      r = Math.min(r, b.rows.length - 1);
+    }
+    if (action === "col-del") {
+      if (cols === 1) return;
+      b.rows.forEach((row) => row.splice(c, 1));
+      b.align?.splice(c, 1);
+      c = Math.min(c, cols - 2);
+    }
+    b.at = { r, c };
+    render();
+    focusCell(b.id, r, c);
+    changed();
+  }
+
+  root.addEventListener("focusin", (e) => {
+    const cell = e.target.closest?.(".tbl-cell");
+    const b = cell && find(blockIdOf(cell))?.block;
+    if (b) b.at = { r: Number(cell.dataset.r), c: Number(cell.dataset.c) };
+  });
+
   /** @param {{list:Block[],index:number}} spot @param {Block} b @param {number|"end"} at @returns {void} */
   function addAfter(spot, b, at = 0) {
     spot.list.splice(spot.index + 1, 0, b);
@@ -646,6 +859,11 @@ export function mountEditor(host, options) {
   }
 
   root.addEventListener("paste", (e) => {
+    if (e.target.closest?.(".tbl-cell")) {
+      e.preventDefault();
+      document.execCommand("insertText", false, e.clipboardData.getData("text/plain").replace(/\s*\n\s*/g, " "));
+      return;
+    }
     const textEl = e.target.closest(".blk-text");
     if (!textEl || [...e.clipboardData.files].length) return;
     e.preventDefault();
@@ -673,6 +891,17 @@ export function mountEditor(host, options) {
       changed();
       return;
     }
+    if (["row-add", "col-add", "row-del", "col-del"].includes(action) && spot) { editTable(spot.block, action); return; }
+    if (action === "gal-pick" && spot) {
+      spot.block.picking = true;
+      render();
+      root.querySelector(`[data-bid="${spot.block.id}"] .gal-search`)?.focus();
+      return;
+    }
+    const choice = t.closest("[data-gal]");
+    if (choice && spot) { pickGallery(spot.block, choice.dataset.gal); return; }
+    const card = t.closest(".blk-gallery .card[data-id]");
+    if (card && !t.closest("[data-action]")) { location.hash = `#/p/${card.dataset.id}`; return; }
     if (action === "fold" && spot) { spot.block.open = !spot.block.open; render(spot.block.open ? spot.block.children?.[0]?.id : spot.block.id, spot.block.open ? 0 : "end"); return; }
     if (action === "icon" && spot) {
       options.pickEmoji(t.closest("[data-ed]"), (emoji) => { Object.assign(spot.block, { icon: emoji, kind: emoji, explicitColor: true }); render(); changed(); });
@@ -713,7 +942,7 @@ export function mountEditor(host, options) {
   }
 
   /** @param {Block} b @returns {Block} deep copy with fresh ids */
-  const clone = (b) => ({ ...b, id: `b${nextId++}`, children: b.children?.map(clone) });
+  const clone = (b) => ({ ...b, id: `b${nextId++}`, children: b.children?.map(clone), rows: b.rows?.map((r) => [...r]), align: b.align && [...b.align] });
 
   document.addEventListener("pointerdown", onMenuPointer, true);
   /** @param {PointerEvent} e @returns {void} */

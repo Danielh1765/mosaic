@@ -491,6 +491,45 @@ body { font: 15px/1.5 var(--font); letter-spacing: -0.005em; }
 .blk-text code { font: 0.88em var(--font-mono); background: var(--panel); padding: 1px 5px; border-radius: 5px; }
 .blk-text img { max-width: 100%; border-radius: 10px; }
 
+/* Table block */
+.blk-main > .tbl-wrap, .blk-main > .gal { flex: 1; min-width: 0; }
+.tbl-wrap { margin: 6px 0; }
+.tbl-scroll { overflow-x: auto; }
+.tbl { border-collapse: collapse; width: 100%; font-size: 0.95em; }
+.tbl-cell { border: 1px solid var(--line); padding: 6px 10px; min-width: 90px; vertical-align: top; outline: none; white-space: pre-wrap; word-break: break-word; text-align: left; }
+th.tbl-cell { font-weight: 600; background: var(--panel); }
+.tbl-cell:focus { box-shadow: inset 0 0 0 2px var(--accent-ink); }
+.tbl-cell a { color: var(--accent-ink); }
+.tbl-tools { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; opacity: 0; transition: opacity 0.12s; }
+.blk-table:hover .tbl-tools, .blk-table:focus-within .tbl-tools { opacity: 1; }
+.tbl-tools button { border: 1px solid var(--line); background: var(--surface); color: var(--ink-soft); border-radius: 6px; padding: 2px 9px; font-size: 12.5px; cursor: pointer; }
+.tbl-tools button:hover { color: var(--ink); border-color: var(--ink-soft); }
+@media (hover: none) { .tbl-tools { opacity: 1; } }
+
+/* Gallery block */
+.gal { margin: 8px 0; padding: 12px; border: 1px solid var(--line); border-radius: 12px; }
+.gal-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
+.gal-title { font-weight: 700; color: var(--ink); text-decoration: none; }
+.gal-title:hover { text-decoration: underline; }
+.gal-count { font-size: 12px; color: var(--ink-soft); flex: 1; }
+.gal-change { border: 0; background: none; color: var(--ink-soft); font-size: 12.5px; border-radius: 6px; padding: 2px 8px; cursor: pointer; opacity: 0; }
+.blk-gallery:hover .gal-change, .gal-change:focus-visible { opacity: 1; }
+.gal-change:hover { background: var(--panel); color: var(--ink); }
+@media (hover: none) { .gal-change { opacity: 1; } }
+.gal .grid { gap: 12px; --card-min: 150px; }
+.gal .card .scrim { padding: 32px 10px 9px; }
+.gal .card .card-title { font-size: 14px; }
+.gal .card .fill { font-size: 40px; }
+.gal-empty { color: var(--ink-soft); font-size: 14px; margin: 4px 2px; }
+.gal-ask { margin: 0 0 8px; font-weight: 600; }
+.gal-search { width: 100%; box-sizing: border-box; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: inherit; background: var(--bg); color: var(--ink); }
+.gal-list { margin-top: 6px; max-height: 280px; overflow-y: auto; }
+.gal-list button { display: flex; align-items: center; gap: 10px; width: 100%; border: 0; background: none; text-align: left; padding: 6px 8px; border-radius: 8px; color: var(--ink); cursor: pointer; }
+.gal-list button strong { font-weight: 600; flex: 1; }
+.gal-list button small { color: var(--ink-soft); font-size: 12px; }
+.gal-list button.on, .gal-list button:hover { background: var(--panel); }
+.gal-list button.current strong::after { content: " (current)"; font-weight: 400; color: var(--ink-soft); }
+
 /* Side buttons: + and ⋮⋮ appear on hover, left of the block */
 .blk-side { position: absolute; left: -52px; top: 3px; display: flex; gap: 2px; opacity: 0; transition: opacity 0.12s; }
 .blk:hover > .blk-side, .blk:focus-within > .blk-side { opacity: 1; }

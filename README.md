@@ -32,10 +32,12 @@ lsof -ti tcp:4321 | xargs kill
 - **Folders:** link a page to a real folder (⌥⌘C in Finder copies the path). The 📁 button opens it in Finder (Mac app only). A red, crossed-out path means the folder is missing.
 - **Reorder:** drag cards. Drop a card on a sidebar page to move it inside that page.
 - **Write:** click anywhere on the page and type. The page always stays formatted. Click below the last line to add more.
-- **"/" menu:** type `/` for Text, Heading 1–3, Toggle list, Toggle heading 1–3, Bulleted list, Numbered list, To-do, Callout, Quote, Divider, Code or Page (a new page inside this one). Type a word after `/` to filter. Arrow keys + Enter pick.
+- **"/" menu:** type `/` for Text, Heading 1–3, Toggle list, Toggle heading 1–3, Bulleted list, Numbered list, To-do, Callout, Quote, Divider, Code, Page (a new page inside this one), Table or Gallery. Type a word after `/` to filter. Arrow keys + Enter pick.
 - **Shortcuts at the start of a line:** `# ` `## ` `### ` headings, `- ` bullet, `1. ` numbered, `[] ` to-do, `> ` quote, ` ``` ` code, `---` divider. `**bold**`, `*italic*` and `` `code` `` show formatted after you press Enter.
 - **Blocks:** hover a line. `+` adds a line below. Drag `⋮⋮` to move it. Click `⋮⋮` to duplicate, delete, turn it into another block, or change a callout's colour. Click a callout's emoji to change it.
 - **Keys:** Enter = new line (twice leaves a list or a box). Backspace at the start of a line joins it to the line above. Links open with a click.
+- **Table block (`/table`):** starts as 3 × 3. Click a cell and type. Tab = next cell (Tab in the last cell adds a row). Shift+Tab = back. Enter = cell below. Hover the table for **+ Row**, **+ Column**, **− Row**, **− Column** (they act where the cursor is). The top row is the header. Saves as a normal Markdown table (`| a | b |`), so Obsidian shows it too. Markdown tables already in a page open as this block.
+- **Gallery block (`/gallery`):** pick a page from the search list (arrows + Enter, Esc cancels). Its cards show inline as small covers (first 12, then "See all"). Click a card to open it. Hover → **Change page** to pick another. Saves as one line, `[Gallery: Title](#/gallery/<id>)`, which Obsidian shows as a plain link.
 - Pages still save as Markdown. Toggles save as Obsidian foldable callouts (`> [!toggle]- Title`).
 - **Poster pages:** when a list uses Poster, Portrait or Tall cards, each page inside shows its cover as a poster beside the details.
 - **From Notion (2026-10-14):** Movies (351), Series (60) and Documentaries (27) live in 02 Areas › Enjoyment › Entertainment. Posters are saved in `workspace/covers/media/`.

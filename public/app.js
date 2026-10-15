@@ -364,6 +364,13 @@ function mountBody(page) {
       location.hash = `#/p/${pid}`;
     },
     pickEmoji: (anchor, done) => emojiPicker(anchor, done),
+    galleryHtml: (pid) => {
+      const kids = childrenOf(pid);
+      if (!kids.length) return "";
+      const more = kids.length > 12 ? `<a class="card add-card" href="#/p/${pid}">See all ${kids.length} →</a>` : "";
+      return `<div class="grid ratio-${collectionConfig(pid).cardRatio} size-s">${kids.slice(0, 12).map((p) => cardHtml(p, false)).join("")}${more}</div>`;
+    },
+    listPages: () => [...state.pages.values()].map((p) => ({ id: p.id, title: p.title || "Untitled", icon: p.icon || "", count: childrenOf(p.id).length })),
   });
 }
 
