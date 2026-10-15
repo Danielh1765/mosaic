@@ -1,7 +1,7 @@
 # Mosaic
-Last updated: 2026-10-14 (v2)
+Last updated: 2026-10-15 (v3, online)
 
-A visual-first page and card app. A personal alternative to Notion. Runs on this Mac only. No internet needed.
+A visual-first page and card app. A personal alternative to Notion. Use it online at https://mosaic-iota-one.vercel.app or on this Mac at http://localhost:4321. Both show the same pages. Sign in with your Mosaic account.
 
 ## Start it
 Double-click `Start Mosaic.command`. Your browser opens at http://localhost:4321. Close the Terminal window to stop it.
@@ -10,7 +10,12 @@ Or in Terminal:
 ```bash
 node "/Volumes/Transcend/02 Areas/AI/SAAS/Mosaic/server.mjs"
 ```
-Transcend must be plugged in.
+Transcend must be plugged in. The Mac app needs the internet.
+
+No internet? Start it in offline mode. It uses only the Mac copy in `workspace/`, and online changes made while offline are not included:
+```bash
+MOSAIC_STORE=files node "/Volumes/Transcend/02 Areas/AI/SAAS/Mosaic/server.mjs"
+```
 
 Stop it:
 ```bash
@@ -24,7 +29,7 @@ lsof -ti tcp:4321 | xargs kill
 - **Cards are pages.** Click a card to open it. Each page can hold more cards.
 - **Card shape:** Wide, Square, Portrait or Tall. Size: S, M or L. Each page remembers its own setting.
 - **Covers:** drag an image from Finder onto a card. Or open a page and paste an image (⌘V). Or use ⋯ → Add cover.
-- **Folders:** link a page to a real folder (⌥⌘C in Finder copies the path). The 📁 button opens it in Finder. A red, crossed-out path means the folder is missing.
+- **Folders:** link a page to a real folder (⌥⌘C in Finder copies the path). The 📁 button opens it in Finder (Mac app only). A red, crossed-out path means the folder is missing.
 - **Reorder:** drag cards. Drop a card on a sidebar page to move it inside that page.
 - **Write:** click the text area under the cards. Markdown works. Click a `[ ]` box to tick it.
 - **Callouts:** while editing, click 💡 Callout, or type `> [!🍿 gray]` then `> your text` on the next lines. Colours: gray, brown, orange, yellow, green, blue, purple, pink, red. Obsidian types like `> [!tip]` work too.
@@ -32,26 +37,29 @@ lsof -ti tcp:4321 | xargs kill
 - **From Notion (2026-10-14):** Movies (351), Series (60) and Documentaries (27) live in 02 Areas › Enjoyment › Entertainment. Posters are saved in `workspace/covers/media/`.
 - **From Notion, goals (2026-10-14):** 13 Quarterly Quests filed under their pillars (status "Quest"). Meaning holds the Quarterly Quests overview (links to every quest), Future Sketch, Days and Weeks. Templates and empty pages were skipped.
 - **Search:** ⌘K. Searches titles and text.
-- **Delete:** ⋯ → Move to trash. Files go to `workspace/.trash/`.
+- **Delete:** ⋯ → Move to trash.
 - **Trash:** click Trash in the sidebar. Restore brings back a page and everything inside it. "Delete forever" erases it (asks first).
 - **Covers credit:** the 12 Areas photos are openly licensed (Openverse). Each page ends with the photo credit.
 
 ## Where your data lives
-- Pages: `workspace/*.md` (frontmatter + Markdown). Obsidian and Jarvis can read them.
-- Cover images: `workspace/covers/`.
-- Home gallery settings: `workspace/.mosaic.json`.
-- Use another folder: `MOSAIC_WORKSPACE="/path" node server.mjs`.
+- **Online is the main copy.** Pages are in the Supabase project "mosaic" (London, free plan), table `pages`. Covers are in the private `covers` bucket. Only your account can read them.
+- **Mac copy (save to Mac):** every time the Mac app loads or saves, it copies the online pages to `workspace/*.md` and covers to `workspace/covers/`. Obsidian and Jarvis can read them. Pages deleted online move to `workspace/.trash/`. Nothing is erased.
+- Edits made in `workspace/*.md` by hand do **not** go online. Edit in Mosaic.
+- Backup from before the move online: `workspace-backup-2026-10-15/` (Mac only).
+- One account only. New sign-ups are blocked in the database.
+- Free Supabase sleeps after 7 days with no use. Wake it in the Supabase dashboard (Restore project).
 
-## Live demo (2026-10-14)
-- Site: https://mosaic-iota-one.vercel.app · Code: https://github.com/Danielh1765/mosaic (public).
-- The demo shows the sample pages in `demo-workspace/`. Your real `workspace/` never goes online (`.gitignore` and `.vercelignore` both block it).
-- Edits on the live site work but reset when Vercel restarts the server. Visitors share one copy.
-- To update the live site: commit and `git push`. Vercel deploys by itself.
+## Update the live site
+- Commit and `git push` to `main`. Vercel deploys by itself. Code: https://github.com/Danielh1765/mosaic (public, no pages in it).
 - Vercel CLI ignores `.gitignore`. Keep `workspace/` in `.vercelignore`.
+- `vercel.json` needs `"framework": null`, or Vercel runs `public/app.js` as the server.
 
 ## Files
-- `api/index.mjs` — Vercel entry. Copies `demo-workspace/` to `/tmp` and runs `server.mjs` on it.
-- `demo-workspace/` — sample pages for the live demo.
-- `server.mjs` — local server, Node built-ins only (no installs).
+- `server.mjs` — the server (Node built-ins only). Same code on the Mac and on Vercel.
+- `store-cloud.mjs` — reads and writes pages and covers in Supabase as the signed-in user.
+- `store-files.mjs` — reads and writes `workspace/` (offline mode and the Mac copy).
+- `mirror.mjs` — first upload from the Mac, then save to Mac.
+- `auth.mjs` — sign-in, 30-day session cookie. `config.mjs` — Supabase address and public key.
+- `api/index.mjs` — Vercel entry.
 - `public/` — the app (`index.html`, `app.css`, `app.js`).
 - `SPEC.md` — reverse-engineering notes and build spec.
