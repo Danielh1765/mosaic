@@ -1,4 +1,4 @@
-// Mosaic front end. Visual-first pages and card galleries, saved as Markdown files by server.mjs.
+// Mosaic front end. Visual-first pages and card galleries, saved online by server.mjs (or as Markdown files offline).
 
 const RATIOS = [
   { id: "landscape", label: "Wide", w: 14, h: 8 },
@@ -64,15 +64,53 @@ function toast(message) {
 async function api(url, options = {}) {
   const res = await fetch(url, { headers: { "Content-Type": "application/json" }, ...options });
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401 && data.signIn) showSignIn();
   if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
   return data;
 }
+
+/** @returns {void} */
+function showSignIn() {
+  const box = $("#signin");
+  if (!box.hidden) return;
+  box.hidden = false;
+  if (["localhost", "127.0.0.1"].includes(location.hostname))
+    $("#signin-msg").textContent = "The first sign-in on your Mac uploads all your pages. It takes a minute or two.";
+  box.querySelector("input").focus();
+}
+
+$("#signin-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const mode = event.submitter?.dataset.mode || "login";
+  const msg = $("#signin-msg");
+  form.querySelectorAll("button").forEach((b) => { b.disabled = true; });
+  msg.textContent = mode === "signup" ? "Making your account…" : "Signing in…";
+  try {
+    const res = await fetch(`/api/${mode}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: form.email.value, password: form.password.value }) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "That did not work. Try again.");
+    if (data.confirm) { msg.textContent = "Account made. Open the email from Supabase and click the link, then sign in here."; return; }
+    msg.textContent = "Loading your pages…";
+    location.reload();
+  } catch (err) {
+    msg.textContent = err.message;
+  } finally {
+    form.querySelectorAll("button").forEach((b) => { b.disabled = false; });
+  }
+});
+
+$("#sign-out").addEventListener("click", async () => {
+  await fetch("/api/logout", { method: "POST" });
+  location.reload();
+});
 
 /** @returns {Promise<void>} */
 async function loadAll() {
   const data = await api("/api/pages");
   state.pages = new Map(data.pages.map((p) => [p.id, p]));
   state.settings = { ...state.settings, ...data.settings };
+  $("#sign-out").hidden = !data.online;
 }
 
 /** @param {string} parentId @returns {object[]} */
@@ -1160,5 +1198,6 @@ window.addEventListener("focus", async () => {
 });
 
 loadAll().then(() => { render(); refreshTrashCount(); }).catch((err) => {
+  if (!$("#signin").hidden) return;
   main.innerHTML = `<div class="page"><p class="empty-state">Mosaic cannot reach its server.<br>${esc(err.message)}</p></div>`;
 });

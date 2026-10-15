@@ -1,21 +1,24 @@
-// Mosaic local server. Zero dependencies: Node built-ins only.
-// Pages are Markdown files in ./workspace. Covers are images in ./workspace/covers.
+// Mosaic server. Zero dependencies: Node built-ins only.
+// Default: pages live online (Supabase) behind a sign-in, and the Mac keeps a copy in ./workspace.
+// MOSAIC_STORE=files: offline mode, pages are only the Markdown files in ./workspace, no sign-in.
 import http from "node:http";
 import { promises as fs, existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { createFileStore, newId, slugify } from "./store-files.mjs";
+import { createCloudStore } from "./store-cloud.mjs";
+import { getSession, signIn, signUp, setSessionCookie, clearSessionCookie } from "./auth.mjs";
+import { importFromMac, saveToMac } from "./mirror.mjs";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const WORKSPACE = process.env.MOSAIC_WORKSPACE || path.join(ROOT, "workspace");
-const COVERS = path.join(WORKSPACE, "covers");
-const TRASH = path.join(WORKSPACE, ".trash");
-const SETTINGS_FILE = path.join(WORKSPACE, ".mosaic.json");
 const PUBLIC = path.join(ROOT, "public");
 const PORT = Number(process.env.PORT || 4321);
 const HOST = "127.0.0.1";
+const ON_VERCEL = Boolean(process.env.VERCEL);
+const OFFLINE = !ON_VERCEL && process.env.MOSAIC_STORE === "files";
 
-const FIELD_ORDER = ["id", "title", "icon", "cover", "parent", "order", "folder", "cardRatio", "cardSize", "view", "status", "boardColumns", "created", "updated"];
 const EDITABLE = ["title", "icon", "cover", "parent", "order", "folder", "cardRatio", "cardSize", "view", "status", "boardColumns", "body"];
 const MIME = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
@@ -24,75 +27,16 @@ const MIME = {
 };
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".svg"]);
 
-/** @typedef {{id:string,title:string,icon?:string,cover?:string,parent?:string,order:number,folder?:string,cardRatio?:string,cardSize?:string,created?:string,updated?:string,body:string,file:string}} Page */
+/** @typedef {import("./store-files.mjs").Page} Page */
 
-/** @returns {string} */
-const newId = () => Math.random().toString(36).slice(2, 8);
-
-/** @param {string} title @returns {string} */
-const slugify = (title) =>
-  (title || "untitled").normalize("NFKD").replace(/[^\w\s-]/g, "").trim().replace(/\s+/g, "-").toLowerCase().slice(0, 50) || "untitled";
-
-/** @param {string} raw @returns {Page|null} */
-function parsePage(raw, file) {
-  const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
-  if (!match) return null;
-  /** @type {Record<string, any>} */
-  const meta = {};
-  for (const line of match[1].split(/\r?\n/)) {
-    const i = line.indexOf(":");
-    if (i < 1) continue;
-    const key = line.slice(0, i).trim();
-    const value = line.slice(i + 1).trim();
-    if (value.startsWith('"')) {
-      try { meta[key] = JSON.parse(value); } catch { meta[key] = value.slice(1, -1); }
-    } else if (/^-?\d+(\.\d+)?$/.test(value)) meta[key] = Number(value);
-    else meta[key] = value;
-  }
-  if (!meta.id) return null;
-  return { order: 0, title: "Untitled", ...meta, id: String(meta.id), body: match[2], file };
-}
-
-/** @param {Page} page @returns {string} */
-function serializePage(page) {
-  const lines = FIELD_ORDER.filter((k) => page[k] !== undefined && page[k] !== "" && page[k] !== null).map((k) =>
-    typeof page[k] === "number" ? `${k}: ${page[k]}` : `${k}: ${JSON.stringify(String(page[k]))}`
-  );
-  return `---\n${lines.join("\n")}\n---\n${page.body || ""}`;
-}
-
-/** @returns {Promise<Map<string, Page>>} */
-async function loadPages() {
-  const pages = new Map();
-  const names = await fs.readdir(WORKSPACE);
-  await Promise.all(
-    names.filter((n) => n.endsWith(".md")).map(async (name) => {
-      const page = parsePage(await fs.readFile(path.join(WORKSPACE, name), "utf8"), name);
-      if (page) pages.set(page.id, page);
-    })
-  );
-  return pages;
-}
-
-/** @param {Page} page @returns {Promise<Page>} */
-async function writePage(page) {
-  const file = `${slugify(page.title)}-${page.id}.md`;
-  await fs.writeFile(path.join(WORKSPACE, file), serializePage(page));
-  if (page.file && page.file !== file) await fs.rm(path.join(WORKSPACE, page.file), { force: true });
-  page.file = file;
-  return page;
-}
+const macFiles = ON_VERCEL ? null : createFileStore(WORKSPACE);
+const macSync = { running: null, again: false };
 
 /** @param {string|undefined} folder @returns {boolean} */
-const folderExists = (folder) => Boolean(folder) && existsSync(folder);
+const folderExists = (folder) => Boolean(folder) && (ON_VERCEL || existsSync(folder));
 
 /** @param {Page} page @returns {object} */
 const toClient = ({ file, ...page }) => ({ ...page, folderExists: folderExists(page.folder) });
-
-/** @returns {Promise<object>} */
-async function readSettings() {
-  try { return JSON.parse(await fs.readFile(SETTINGS_FILE, "utf8")); } catch { return { cardRatio: "portrait", cardSize: "m" }; }
-}
 
 /** @param {http.IncomingMessage} req @param {number} limit @returns {Promise<Buffer>} */
 function readBody(req, limit = 25 * 1024 * 1024) {
@@ -134,115 +78,119 @@ function descendantsOf(pages, id) {
   return out;
 }
 
-/** @param {http.IncomingMessage} req @param {http.ServerResponse} res */
-async function handleApi(req, res, url) {
+/** Copies the online pages to the Mac in the background. Runs again if a change lands while it works. @param {object} cloud */
+function scheduleSaveToMac(cloud) {
+  if (!macFiles) return;
+  if (macSync.running) { macSync.again = true; return; }
+  macSync.running = (async () => {
+    do {
+      macSync.again = false;
+      const result = await saveToMac(cloud, macFiles, await cloud.listPages());
+      if (result.written || result.moved || result.covers) console.log(`Saved to Mac: ${result.written} pages, ${result.moved} moved to .trash, ${result.covers} covers`);
+    } while (macSync.again);
+  })().catch((err) => console.error(`Save to Mac failed: ${err.message}`)).finally(() => { macSync.running = null; });
+}
+
+/** @param {http.IncomingMessage} req @param {http.ServerResponse} res @param {URL} url */
+async function handleAuth(req, res, url) {
+  const { email, password } = JSON.parse((await readBody(req, 10_000)).toString("utf8") || "{}");
+  if (url.pathname === "/api/logout") { clearSessionCookie(req, res); return sendJson(res, 200, { ok: true }); }
+  if (!email || !password) return sendJson(res, 400, { error: "Type your email and password." });
+  try {
+    const tokens = url.pathname === "/api/signup" ? await signUp(email, password) : await signIn(email, password);
+    if (!tokens) return sendJson(res, 200, { confirm: true });
+    setSessionCookie(req, res, tokens);
+    return sendJson(res, 200, { ok: true });
+  } catch (err) {
+    return sendJson(res, 401, { error: err.message });
+  }
+}
+
+/** @param {http.IncomingMessage} req @param {http.ServerResponse} res @param {URL} url @param {object} store */
+async function handleApi(req, res, url, store) {
   const parts = url.pathname.split("/").filter(Boolean); // ["api", ...]
   const json = async () => JSON.parse((await readBody(req, 5 * 1024 * 1024)).toString("utf8") || "{}");
+  const changed = () => { if (store.kind === "cloud") scheduleSaveToMac(store); };
 
   if (parts[1] === "pages" && parts.length === 2 && req.method === "GET") {
-    const pages = await loadPages();
-    return sendJson(res, 200, { pages: [...pages.values()].map(toClient), settings: await readSettings() });
+    if (store.kind === "cloud" && macFiles) {
+      const uploaded = await importFromMac(store, macFiles);
+      if (uploaded) console.log(`Uploaded from Mac: ${uploaded.pages} pages, ${uploaded.covers} covers`);
+    }
+    const pages = await store.listPages();
+    changed();
+    return sendJson(res, 200, { pages: [...pages.values()].map(toClient), settings: await store.readSettings(), online: store.kind === "cloud" });
   }
 
   if (parts[1] === "pages" && parts.length === 2 && req.method === "POST") {
     const input = await json();
-    const pages = await loadPages();
+    const pages = await store.listPages();
     const siblings = [...pages.values()].filter((p) => (p.parent || "") === (input.parent || ""));
     const now = new Date().toISOString();
-    const page = await writePage({
+    const page = await store.savePage({
       id: newId(), title: input.title || "Untitled", icon: input.icon || "", parent: input.parent || "", status: input.status || "",
       order: siblings.reduce((m, p) => Math.max(m, p.order || 0), 0) + 1, body: "", created: now, updated: now, file: "",
     });
+    changed();
     return sendJson(res, 201, toClient(page));
   }
 
   if (parts[1] === "pages" && parts.length === 3 && req.method === "PUT") {
     const input = await json();
-    const pages = await loadPages();
+    const pages = await store.listPages();
     const page = pages.get(parts[2]);
     if (!page) return sendJson(res, 404, { error: "Page not found" });
     if (input.parent && (input.parent === page.id || descendantsOf(pages, page.id).includes(input.parent)))
       return sendJson(res, 400, { error: "A page cannot live inside itself" });
     for (const key of EDITABLE) if (key in input) page[key] = input[key];
     page.updated = new Date().toISOString();
-    return sendJson(res, 200, toClient(await writePage(page)));
+    const saved = await store.savePage(page);
+    changed();
+    return sendJson(res, 200, toClient(saved));
   }
 
   if (parts[1] === "pages" && parts.length === 3 && req.method === "DELETE") {
-    const pages = await loadPages();
+    const pages = await store.listPages();
     if (!pages.has(parts[2])) return sendJson(res, 404, { error: "Page not found" });
     const ids = [parts[2], ...descendantsOf(pages, parts[2])];
-    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-    await fs.mkdir(TRASH, { recursive: true });
-    for (const id of ids) {
-      const file = pages.get(id).file;
-      await fs.rename(path.join(WORKSPACE, file), path.join(TRASH, `${stamp}-${file}`));
-    }
+    await store.trash(ids, new Date().toISOString().replace(/[:.]/g, "-"));
+    changed();
     return sendJson(res, 200, { trashed: ids });
   }
 
   if (parts[1] === "trash" && parts.length === 2 && req.method === "GET") {
-    const names = existsSync(TRASH) ? await fs.readdir(TRASH) : [];
-    const items = [];
-    for (const name of names.filter((n) => n.endsWith(".md"))) {
-      const page = parsePage(await fs.readFile(path.join(TRASH, name), "utf8"), name);
-      if (!page) continue;
-      const stamp = name.slice(0, 24);
-      const trashedAt = stamp.replace(/^(\d{4}-\d{2}-\d{2}T\d{2})-(\d{2})-(\d{2})-(\d{3})Z$/, "$1:$2:$3.$4Z");
-      items.push({ ...toClient(page), trashFile: name, stamp, trashedAt });
-    }
+    const items = (await store.listTrash()).map(({ page, trashFile, stamp }) => ({
+      ...toClient(page), trashFile, stamp,
+      trashedAt: stamp.replace(/^(\d{4}-\d{2}-\d{2}T\d{2})-(\d{2})-(\d{2})-(\d{3})Z$/, "$1:$2:$3.$4Z"),
+    }));
     return sendJson(res, 200, { items });
   }
 
   if (parts[1] === "trash" && parts[2] === "restore" && req.method === "POST") {
     const { trashFile } = await json();
-    const names = existsSync(TRASH) ? await fs.readdir(TRASH) : [];
-    if (!names.includes(trashFile)) return sendJson(res, 404, { error: "That page is not in the trash" });
-    const stamp = trashFile.slice(0, 24);
-    const batch = names.filter((n) => n.startsWith(stamp) && n.endsWith(".md"));
-    const pages = await loadPages();
-    const restoredIds = [];
-    for (const name of batch) {
-      const page = parsePage(await fs.readFile(path.join(TRASH, name), "utf8"), name);
-      if (!page) continue;
-      restoredIds.push(page.id);
-      pages.set(page.id, page);
-    }
-    for (const name of batch) {
-      const page = parsePage(await fs.readFile(path.join(TRASH, name), "utf8"), name);
-      if (!page) continue;
-      if (page.parent && !pages.has(page.parent)) page.parent = "";
-      page.file = "";
-      await writePage(page);
-      await fs.rm(path.join(TRASH, name), { force: true });
-    }
-    return sendJson(res, 200, { restored: restoredIds });
+    const restored = await store.restore(String(trashFile || "").slice(0, 24));
+    if (!restored.length) return sendJson(res, 404, { error: "That page is not in the trash" });
+    changed();
+    return sendJson(res, 200, { restored });
   }
 
   if (parts[1] === "trash" && parts.length === 3 && req.method === "DELETE") {
-    const name = decodeURIComponent(parts[2]);
-    const target = path.normalize(path.join(TRASH, name));
-    if (!target.startsWith(TRASH + path.sep) || !existsSync(target)) return sendJson(res, 404, { error: "That page is not in the trash" });
-    const batch = (await fs.readdir(TRASH)).filter((n) => n.startsWith(name.slice(0, 24)) && n.endsWith(".md"));
-    for (const n of batch) await fs.rm(path.join(TRASH, n), { force: true });
-    return sendJson(res, 200, { deleted: batch });
+    const deleted = await store.purge(decodeURIComponent(parts[2]).slice(0, 24));
+    if (!deleted.length) return sendJson(res, 404, { error: "That page is not in the trash" });
+    return sendJson(res, 200, { deleted });
   }
 
   if (parts[1] === "reorder" && req.method === "POST") {
     const { ids } = await json();
-    const pages = await loadPages();
-    await Promise.all(ids.map((id, i) => {
-      const page = pages.get(id);
-      if (!page || page.order === i + 1) return null;
-      page.order = i + 1;
-      return writePage(page);
-    }));
+    await store.reorder(ids);
+    changed();
     return sendJson(res, 200, { ok: true });
   }
 
   if (parts[1] === "settings" && req.method === "PUT") {
-    const settings = { ...(await readSettings()), ...(await json()) };
-    await fs.writeFile(SETTINGS_FILE, JSON.stringify(settings, null, 2));
+    const settings = { ...(await store.readSettings()), ...(await json()) };
+    await store.writeSettings(settings);
+    changed();
     return sendJson(res, 200, settings);
   }
 
@@ -251,11 +199,14 @@ async function handleApi(req, res, url) {
     const ext = path.extname(original).toLowerCase();
     if (!IMAGE_EXTS.has(ext)) return sendJson(res, 400, { error: "That file is not an image" });
     const name = `${slugify(path.basename(original, ext))}-${newId()}${ext}`;
-    await fs.writeFile(path.join(COVERS, name), await readBody(req));
+    const data = await readBody(req);
+    await store.putCover(name, data, MIME[ext]);
+    if (store.kind === "cloud" && macFiles) await macFiles.putCover(name, data).catch(() => {});
     return sendJson(res, 201, { cover: `covers/${name}` });
   }
 
   if (parts[1] === "open" && req.method === "POST") {
+    if (ON_VERCEL) return sendJson(res, 400, { error: "Open in Finder works in the Mac app only." });
     const { target } = await json();
     if (!target || !path.isAbsolute(target) || !existsSync(target)) return sendJson(res, 404, { error: "That folder does not exist. Is Transcend plugged in?" });
     const args = statSync(target).isDirectory() ? [target] : ["-R", target];
@@ -266,20 +217,39 @@ async function handleApi(req, res, url) {
   sendJson(res, 404, { error: "Unknown API route" });
 }
 
+/** @param {http.ServerResponse} res @param {object} store @param {string} rel */
+async function sendCover(res, store, rel) {
+  const name = decodeURIComponent(rel);
+  const data = (macFiles && (await macFiles.readCover(name))) || (store.kind === "cloud" ? await store.readCover(name) : null);
+  if (!data) return sendJson(res, 404, { error: "Not found" });
+  res.writeHead(200, { "Content-Type": MIME[path.extname(name).toLowerCase()] || "application/octet-stream", "Cache-Control": "private, max-age=604800" });
+  res.end(data);
+}
+
 /** @param {http.IncomingMessage} req @param {http.ServerResponse} res @returns {Promise<void>} */
 export async function handleRequest(req, res) {
   const url = new URL(req.url, `http://${HOST}`);
   try {
-    if (url.pathname.startsWith("/api/")) return await handleApi(req, res, url);
-    if (url.pathname.startsWith("/covers/")) return await sendStatic(res, COVERS, url.pathname.slice("/covers/".length));
-    return await sendStatic(res, PUBLIC, url.pathname === "/" ? "index.html" : url.pathname.slice(1));
+    const isApi = url.pathname.startsWith("/api/");
+    const isCover = url.pathname.startsWith("/covers/");
+    if (!isApi && !isCover) return await sendStatic(res, PUBLIC, url.pathname === "/" ? "index.html" : url.pathname.slice(1));
+    if (["/api/login", "/api/signup", "/api/logout"].includes(url.pathname) && req.method === "POST") return await handleAuth(req, res, url);
+
+    let store = macFiles;
+    if (!OFFLINE) {
+      const session = await getSession(req, res);
+      if (!session) return sendJson(res, 401, { error: "Please sign in.", signIn: true });
+      store = createCloudStore(session);
+    }
+    if (isCover) return await sendCover(res, store, url.pathname.slice("/covers/".length));
+    return await handleApi(req, res, url, store);
   } catch (err) {
     sendJson(res, 500, { error: err.message });
   }
 }
 
-await fs.mkdir(COVERS, { recursive: true });
-// On Vercel, api/index.mjs imports handleRequest instead of starting a server.
-if (!process.env.VERCEL) {
-  http.createServer(handleRequest).listen(PORT, HOST, () => console.log(`Mosaic is running at http://localhost:${PORT}\nWorkspace: ${WORKSPACE}`));
+if (!ON_VERCEL) {
+  await fs.mkdir(path.join(WORKSPACE, "covers"), { recursive: true });
+  http.createServer(handleRequest).listen(PORT, HOST, () =>
+    console.log(`Mosaic is running at http://localhost:${PORT}\n${OFFLINE ? `Offline. Pages: ${WORKSPACE}` : `Online pages. Mac copy: ${WORKSPACE}`}`));
 }

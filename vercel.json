@@ -2,9 +2,7 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
   "outputDirectory": "public",
-  "functions": {
-    "api/index.mjs": { "includeFiles": "{server.mjs,demo-workspace/**}" }
-  },
+  "regions": ["lhr1"],
   "rewrites": [
     { "source": "/api/:path*", "destination": "/api/index" },
     { "source": "/covers/:path*", "destination": "/api/index" }
