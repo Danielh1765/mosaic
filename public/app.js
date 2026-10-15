@@ -1,5 +1,7 @@
 // Mosaic front end. Visual-first pages and card galleries, saved online by server.mjs (or as Markdown files offline).
 
+import { mountEditor } from "./editor.js";
+
 const RATIOS = [
   { id: "landscape", label: "Wide", w: 14, h: 8 },
   { id: "square", label: "Square", w: 10, h: 10 },
@@ -165,6 +167,7 @@ function savePage(id, patch, delay = 0) {
   saveTimers.set(id, setTimeout(async () => {
     const body = page._pending;
     page._pending = null;
+    page._saving = (page._saving || 0) + 1;
     try {
       const saved = await api(`/api/pages/${id}`, { method: "PUT", body: JSON.stringify(body) });
       Object.assign(page, { folderExists: saved.folderExists, updated: saved.updated });
@@ -173,6 +176,8 @@ function savePage(id, patch, delay = 0) {
     } catch (err) {
       setSaveState("Not saved");
       toast(err.message);
+    } finally {
+      page._saving -= 1;
     }
   }, delay));
 }
@@ -190,6 +195,20 @@ async function createPage(parent, extra = {}) {
   if (parent) { state.expanded.add(parent); writeLocal("mosaic.expanded", [...state.expanded]); }
   location.hash = `#/p/${page.id}`;
   requestAnimationFrame(() => { const t = $(".title"); if (t) { t.focus(); t.select(); } });
+}
+
+/** @param {string} parent @returns {Promise<string|null>} new page id, made inside parent */
+async function createSubPage(parent) {
+  try {
+    const page = await api("/api/pages", { method: "POST", body: JSON.stringify({ parent, title: "Untitled" }) });
+    state.pages.set(page.id, page);
+    state.expanded.add(parent);
+    writeLocal("mosaic.expanded", [...state.expanded]);
+    return page.id;
+  } catch (err) {
+    toast(err.message);
+    return null;
+  }
 }
 
 /** @param {string} id @returns {Promise<void>} */
@@ -259,6 +278,8 @@ function render() {
 
 /** @returns {void} */
 function renderMain() {
+  editor?.destroy();
+  editor = null;
   if (state.query) return renderSearch();
   $("#trash-link").classList.toggle("active", location.hash === "#/trash");
   if (location.hash === "#/trash") return renderTrash();
@@ -294,7 +315,7 @@ function renderMain() {
       </div>`;
   const title = `<input class="title" value="${esc(page.title)}" placeholder="Untitled" aria-label="Page title">`;
   const body = `<section class="body-wrap">
-        <div class="body-view">${renderMarkdown(page.body || "")}</div>
+        <div class="doc-host"></div>
         <div class="save-state"></div>
       </section>`;
 
@@ -323,6 +344,27 @@ function renderMain() {
       ${metaRow}
     </div>`;
   document.title = `${page.title || "Untitled"} · Mosaic`;
+  mountBody(page);
+}
+
+let editor = null;
+
+/** @param {object} page @returns {void} shows the page text as editable blocks */
+function mountBody(page) {
+  const host = main.querySelector(".doc-host");
+  if (!host) return;
+  editor = mountEditor(host, {
+    markdown: page.body || "",
+    onChange: (md) => savePage(page.id, { body: md }, 600),
+    titleOf: (pid) => state.pages.get(pid)?.title || "",
+    iconOf: (pid) => state.pages.get(pid)?.icon || "",
+    createPage: () => createSubPage(page.id),
+    openPage: (pid) => {
+      window.addEventListener("hashchange", () => requestAnimationFrame(() => { const t = $(".title"); if (t) { t.focus(); t.select(); } }), { once: true });
+      location.hash = `#/p/${pid}`;
+    },
+    pickEmoji: (anchor, done) => emojiPicker(anchor, done),
+  });
 }
 
 /** @returns {void} */
@@ -554,89 +596,6 @@ function cardHtml(page, draggable) {
   </div>`;
 }
 
-/* ---------- Markdown ---------- */
-
-/** @param {string} text @returns {string} */
-function inlineMd(text) {
-  return esc(text)
-    .replace(/`([^`]+)`/g, "<code>$1</code>")
-    .replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, '<img alt="$1" src="$2">')
-    .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, label, href) => href.startsWith("#") ? `<a href="${href}">${label}</a>` : /^(https?:|mailto:|\/)/.test(href) ? `<a href="${href}" target="_blank" rel="noopener">${label}</a>` : m)
-    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-    .replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>")
-    .replace(/~~([^~]+)~~/g, "<del>$1</del>");
-}
-
-const CALLOUT_COLORS = ["gray", "brown", "orange", "yellow", "green", "blue", "purple", "pink", "red"];
-const CALLOUT_TYPES = { note: ["📝", "blue"], info: ["ℹ️", "blue"], tip: ["💡", "green"], success: ["✅", "green"], question: ["❓", "yellow"], warning: ["⚠️", "orange"], danger: ["🚨", "red"], quote: ["💬", "gray"], example: ["🧪", "purple"] };
-
-/**
- * Callout header: "[!🍿 gray] Optional title" (emoji + colour) or Obsidian style "[!tip] Title".
- * @param {string} head @returns {{icon:string, color:string, title:string}|null}
- */
-function parseCallout(head) {
-  const m = head.match(/^\[!([^\]\s]+)(?:\s+([a-z]+))?\][+-]?\s*(.*)$/i);
-  if (!m) return null;
-  const type = CALLOUT_TYPES[m[1].toLowerCase()];
-  const color = CALLOUT_COLORS.includes((m[2] || "").toLowerCase()) ? m[2].toLowerCase() : type ? type[1] : "gray";
-  return { icon: type ? type[0] : m[1], color, title: m[3] };
-}
-
-/** @param {string} md @param {number} offset first line number, for task checkboxes @returns {string} */
-function renderMarkdown(md, offset = 0) {
-  const lines = md.replace(/\r/g, "").split("\n");
-  const out = [];
-  let list = null;
-  let inCode = false;
-  const closeList = () => { if (list) { out.push(`</${list}>`); list = null; } };
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const n = offset + i;
-    if (line.startsWith("```")) {
-      closeList();
-      out.push(inCode ? "</code></pre>" : "<pre><code>");
-      inCode = !inCode;
-      continue;
-    }
-    if (inCode) { out.push(`${esc(line)}\n`); continue; }
-    if (/^>( |$)/.test(line)) {
-      closeList();
-      const start = i;
-      const inner = [];
-      while (i < lines.length && /^>( |$)/.test(lines[i])) { inner.push(lines[i].replace(/^> ?/, "")); i++; }
-      i--;
-      const callout = parseCallout(inner[0] || "");
-      if (callout) {
-        out.push(`<aside class="callout callout-${callout.color}"><span class="callout-icon" aria-hidden="true">${esc(callout.icon)}</span><div class="callout-body">${callout.title ? `<p class="callout-title">${inlineMd(callout.title)}</p>` : ""}${renderMarkdown(inner.slice(1).join("\n"), offset + start + 1)}</div></aside>`);
-      } else out.push(`<blockquote>${renderMarkdown(inner.join("\n"), offset + start)}</blockquote>`);
-      continue;
-    }
-    const task = line.match(/^\s*[-*] \[( |x|X)\] (.*)$/);
-    const bullet = line.match(/^\s*[-*] (.*)$/);
-    const numbered = line.match(/^\s*\d+\. (.*)$/);
-    if (task || bullet) {
-      if (list !== "ul") { closeList(); out.push("<ul>"); list = "ul"; }
-      out.push(task
-        ? `<li class="task"><input type="checkbox" data-line="${n}" ${task[1] !== " " ? "checked" : ""}>${inlineMd(task[2])}</li>`
-        : `<li>${inlineMd(bullet[1])}</li>`);
-      continue;
-    }
-    if (numbered) {
-      if (list !== "ol") { closeList(); out.push("<ol>"); list = "ol"; }
-      out.push(`<li>${inlineMd(numbered[1])}</li>`);
-      continue;
-    }
-    closeList();
-    const heading = line.match(/^(#{1,3}) (.*)$/);
-    if (heading) out.push(`<h${heading[1].length}>${inlineMd(heading[2])}</h${heading[1].length}>`);
-    else if (/^---+$/.test(line.trim())) out.push("<hr>");
-    else if (line.trim()) out.push(`<p>${inlineMd(line)}</p>`);
-  }
-  closeList();
-  if (inCode) out.push("</code></pre>");
-  return out.join("");
-}
-
 /* ---------- Popovers ---------- */
 
 /** @param {HTMLElement} anchor @param {string} html @returns {HTMLElement} */
@@ -669,11 +628,16 @@ function closePop() {
 
 /** @param {HTMLElement} anchor @param {string} id @returns {void} */
 function iconPicker(anchor, id) {
+  emojiPicker(anchor, (emoji) => { savePage(id, { icon: emoji }); render(); }, true);
+}
+
+/** @param {HTMLElement} anchor @param {(emoji:string)=>void} done @param {boolean} removable @returns {void} */
+function emojiPicker(anchor, done, removable = false) {
   const pop = openPop(anchor, `<div class="emoji-grid">${EMOJIS.map((e) => `<button data-emoji="${e}">${e}</button>`).join("")}</div>
     <input type="text" placeholder="Or type any emoji" maxlength="8">
-    <button class="ghost-btn" data-emoji="" style="margin-top:6px">Remove icon</button>`);
+    ${removable ? `<button class="ghost-btn" data-emoji="" style="margin-top:6px">Remove icon</button>` : ""}`);
   /** @param {string} emoji @returns {void} */
-  const pick = (emoji) => { savePage(id, { icon: emoji }); closePop(); render(); };
+  const pick = (emoji) => { closePop(); done(emoji); };
   pop.addEventListener("click", (e) => { const b = e.target.closest("[data-emoji]"); if (b) pick(b.dataset.emoji); });
   pop.querySelector("input").addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target.value.trim()) pick(e.target.value.trim()); });
 }
@@ -729,55 +693,6 @@ function pickCover(id) {
   coverTarget = id;
   $("#cover-input").value = "";
   $("#cover-input").click();
-}
-
-/* ---------- Body editor ---------- */
-
-/** @returns {void} */
-function startEditing() {
-  const id = currentId();
-  const page = state.pages.get(id);
-  const view = $(".body-view");
-  if (!page || !view) return;
-  const wrap = document.createElement("div");
-  wrap.className = "body-editor";
-  wrap.innerHTML = `<div class="edit-tools" role="toolbar" aria-label="Insert">
-    <button type="button" data-insert="callout">💡 Callout</button>
-    <button type="button" data-insert="task">☑ Task</button>
-    <button type="button" data-insert="heading">H Heading</button>
-    <span class="edit-hint">Callout colours: gray, brown, orange, yellow, green, blue, purple, pink, red</span>
-  </div>`;
-  const area = document.createElement("textarea");
-  area.className = "body-edit";
-  area.value = page.body || "";
-  area.placeholder = "Write here. Markdown works.";
-  wrap.append(area);
-  view.replaceWith(wrap);
-  const snippets = { callout: "> [!💡 gray]\n> ", task: "- [ ] ", heading: "## " };
-  wrap.querySelector(".edit-tools").addEventListener("pointerdown", (e) => {
-    const btn = e.target.closest("[data-insert]");
-    if (!btn) return;
-    e.preventDefault();
-    const text = snippets[btn.dataset.insert];
-    const at = area.selectionStart;
-    const lineStart = area.value.lastIndexOf("\n", at - 1) + 1;
-    const prefix = at === lineStart ? "" : "\n";
-    area.setRangeText(prefix + text, at, area.selectionEnd, "end");
-    area.dispatchEvent(new Event("input"));
-  });
-  area.style.height = `${Math.max(240, area.scrollHeight + 4)}px`;
-  area.focus();
-  area.addEventListener("input", () => {
-    area.style.height = "auto";
-    area.style.height = `${Math.max(240, area.scrollHeight + 4)}px`;
-    savePage(id, { body: area.value }, 600);
-  });
-  area.addEventListener("blur", () => {
-    const fresh = document.createElement("div");
-    fresh.className = "body-view";
-    fresh.innerHTML = renderMarkdown(state.pages.get(id)?.body || "");
-    wrap.replaceWith(fresh);
-  });
 }
 
 /* ---------- Trash ---------- */
@@ -895,15 +810,7 @@ main.addEventListener("click", (e) => {
     setCollectionConfig(btn.dataset.scope, { [key]: value });
     return renderMain();
   }
-  if (t.matches(".body-view input[type=checkbox]")) {
-    const page = state.pages.get(id);
-    const lines = page.body.split("\n");
-    const n = Number(t.dataset.line);
-    lines[n] = lines[n].replace(/\[( |x|X)\]/, t.checked ? "[x]" : "[ ]");
-    savePage(id, { body: lines.join("\n") });
-    return;
-  }
-  if (t.closest(".body-view") && !t.closest("a")) return startEditing();
+  if (t.closest(".doc-host")) return;
   const card = t.closest(".card[data-id]");
   if (card) location.hash = `#/p/${card.dataset.id}`;
 });
@@ -1186,7 +1093,7 @@ document.addEventListener("keydown", (e) => {
 
 document.addEventListener("paste", (e) => {
   const id = currentId();
-  if (!id || e.target.closest("input, textarea")) return;
+  if (!id || e.target.closest("input, textarea, .blk-code")) return;
   const file = [...e.clipboardData.files].find((f) => f.type.startsWith("image/"));
   if (file) { e.preventDefault(); uploadCover(file, id); }
 });
@@ -1199,10 +1106,17 @@ window.addEventListener("hashchange", () => {
   main.scrollTop = 0;
 });
 
+/** @returns {boolean} true while you are typing or a save is still on its way */
+const busy = () => Boolean(document.activeElement?.closest(".doc, .title, textarea")) || [...state.pages.values()].some((p) => p._pending || p._saving);
+
+/** @returns {string} a fingerprint of all pages, to tell if anything changed */
+const snapshot = () => JSON.stringify([...state.pages.values()].map(({ _pending, _saving, ...p }) => p));
+
 window.addEventListener("focus", async () => {
-  if (document.activeElement?.matches("textarea, .title") || [...state.pages.values()].some((p) => p._pending)) return;
+  if (busy()) return;
+  const before = snapshot();
   await loadAll().catch(() => {});
-  render();
+  if (!busy() && snapshot() !== before) render();
 });
 
 loadAll().then(() => { render(); refreshTrashCount(); }).catch((err) => {
